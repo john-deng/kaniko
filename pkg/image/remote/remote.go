@@ -17,6 +17,12 @@ limitations under the License.
 package remote
 
 import (
+	"encoding/base64"
+	"fmt"
+	"github.com/google/go-containerregistry/pkg/v1/tarball"
+	"io/ioutil"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/GoogleContainerTools/kaniko/pkg/config"
@@ -31,8 +37,22 @@ import (
 )
 
 var (
+	// in-memory cache
 	manifestCache = make(map[string]v1.Image)
+	// on-disk cache directory (override with env MANIFESTS_CACHE_DIR)
+	manifestCacheDir string
 )
+
+func init() {
+	manifestCacheDir = os.Getenv("MANIFESTS_CACHE_DIR")
+	if manifestCacheDir == "" {
+		// default under the Kaniko layer cache
+		manifestCacheDir = "/workspace/.cache/manifests"
+	}
+	if err := loadManifestCache(); err != nil {
+		logrus.Warnf("Failed to load manifest cache: %v", err)
+	}
+}
 
 // RetrieveRemoteImage retrieves the manifest for the specified image from the specified registry
 func RetrieveRemoteImage(image string, opts config.RegistryOptions, customPlatform string) (v1.Image, error) {
@@ -75,6 +95,7 @@ func RetrieveRemoteImage(image string, opts config.RegistryOptions, customPlatfo
 			}
 
 			manifestCache[image] = remoteImage
+			saveManifestCacheEntry(image, remoteImage)
 
 			return remoteImage, nil
 		}
@@ -95,6 +116,7 @@ func RetrieveRemoteImage(image string, opts config.RegistryOptions, customPlatfo
 
 	if remoteImage != nil {
 		manifestCache[image] = remoteImage
+		saveManifestCacheEntry(image, remoteImage)
 	}
 
 	return remoteImage, err
@@ -141,4 +163,102 @@ func remoteOptions(registryName string, opts config.RegistryOptions, customPlatf
 	}
 
 	return []remote.Option{remote.WithTransport(tr), remote.WithAuthFromKeychain(creds.GetKeychain()), remote.WithPlatform(*platform)}
+}
+
+// saveManifestCacheEntry writes out a tarball under manifestCacheDir named
+// "cache-$BASE64(image).tar"
+func saveManifestCacheEntry(image string, img v1.Image) {
+	if err := os.MkdirAll(manifestCacheDir, 0o755); err != nil {
+		logrus.Warnf("Could not create manifest cache dir %q: %v", manifestCacheDir, err)
+		return
+	}
+	file := filepath.Join(manifestCacheDir, encodeName(image)+".tar")
+	ref, err := name.ParseReference(image, name.WeakValidation)
+	if err != nil {
+		logrus.Warnf("Could not parse reference %q for caching: %v", image, err)
+		return
+	}
+	if err := tarball.WriteToFile(file, ref, img); err != nil {
+		logrus.Warnf("Error writing manifest cache for %s: %v", image, err)
+	}
+}
+
+// loadManifestCache scans manifestCacheDir for any “*.tar” files,
+// decodes their filenames back into the original image strings via decodeName,
+// and loads each tarball into the in-memory manifestCache.
+func loadManifestCache() error {
+	entries, err := ioutil.ReadDir(manifestCacheDir)
+	if err != nil {
+		// if the cache directory doesn’t exist yet, that’s fine
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+
+	for _, fi := range entries {
+		// skip non-*.tar files and directories
+		if fi.IsDir() || !strings.HasSuffix(fi.Name(), ".tar") {
+			continue
+		}
+
+		// strip the “.tar” suffix and recover the original image name
+		enc := strings.TrimSuffix(fi.Name(), ".tar")
+		image, err := decodeName(enc)
+		if err != nil {
+			logrus.Warnf("Skipping cache file %q: %v", fi.Name(), err)
+			continue
+		}
+
+		// parse the image reference
+		ref, err := name.ParseReference(image, name.WeakValidation)
+		if err != nil {
+			logrus.Warnf("Invalid reference in cache file %q: %v", fi.Name(), err)
+			continue
+		}
+
+		// tarball.ImageFromPath expects a *name.Tag, so assert and take its address
+		tag, ok := ref.(name.Tag)
+		if !ok {
+			logrus.Warnf("Skipping %q: not a name.Tag reference (got %T)", image, ref)
+			continue
+		}
+
+		// load the image from disk
+		img, err := tarball.ImageFromPath(
+			filepath.Join(manifestCacheDir, fi.Name()),
+			&tag,
+		)
+		if err != nil {
+			logrus.Warnf("Failed to load manifest cache %q: %v", fi.Name(), err)
+			continue
+		}
+
+		// store in the in-memory map
+		manifestCache[image] = img
+		logrus.Infof("Loaded cached manifest for %s", image)
+	}
+
+	return nil
+}
+
+func encodeName(image string) string {
+	// URL-safe, no padding
+	return "cache-" + strings.TrimRight(base64.URLEncoding.EncodeToString([]byte(image)), "=")
+}
+
+func decodeName(encoded string) (string, error) {
+	if !strings.HasPrefix(encoded, "cache-") {
+		return "", fmt.Errorf("unexpected cache file prefix")
+	}
+	data := encoded[len("cache-"):]
+	// add any missing padding
+	if m := len(data) % 4; m != 0 {
+		data += strings.Repeat("=", 4-m)
+	}
+	b, err := base64.URLEncoding.DecodeString(data)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
 }
