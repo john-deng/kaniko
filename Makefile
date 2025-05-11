@@ -22,7 +22,7 @@ VERSION_PACKAGE = $(REPOPATH/pkg/version)
 
 SHELL := /bin/bash
 GOOS ?= $(shell go env GOOS)
-GOARCH ?= $(shell go env GOARCH)
+GOARCH ?= $(shell dpkg --print-architecture)
 ORG := github.com/GoogleContainerTools
 PROJECT := kaniko
 REGISTRY?=gcr.io/kaniko-project
