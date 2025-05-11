@@ -924,12 +924,16 @@ func fetchExtraStages(stages []config.KanikoStage, opts *config.KanikoOptions) e
 				continue
 			}
 
-			// This must be an image name, fetch it.
-			logrus.Debugf("Found extra base image stage %s", c.From)
-			sourceImage, err := remote.RetrieveRemoteImage(c.From, opts.RegistryOptions, opts.CustomPlatform)
+			sourceImage, err := cache.LoadLocalCache(&opts.CacheOptions, c.From)
 			if err != nil {
-				return err
+				// This must be an image name, fetch it.
+				logrus.Debugf("Found extra base image stage %s", c.From)
+				sourceImage, err = remote.RetrieveRemoteImage(c.From, opts.RegistryOptions, opts.CustomPlatform)
+				if err != nil {
+					return err
+				}
 			}
+
 			if err := saveStageAsTarball(c.From, sourceImage); err != nil {
 				return err
 			}

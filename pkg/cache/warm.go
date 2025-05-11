@@ -39,7 +39,7 @@ import (
 func WarmCache(opts *config.WarmerOptions) error {
 	var dockerfileImages []string
 	cacheDir := opts.CacheDir
-	images := opts.Images
+	var images []string
 
 	// if opts.image is empty,we need to parse dockerfilepath to get images list
 	if opts.DockerfilePath != "" {
@@ -49,8 +49,22 @@ func WarmCache(opts *config.WarmerOptions) error {
 		}
 	}
 
-	// TODO: Implement deduplication logic later.
-	images = append(images, dockerfileImages...)
+	// Implementing deduplication logic later.
+	seen := make(map[string]struct{})
+
+	// Loop through the images to filter out duplicates
+	for _, image := range opts.Images {
+		if _, exists := seen[image]; !exists {
+			seen[image] = struct{}{} // Mark this image as seen
+			images = append(images, image)
+		}
+	}
+	for _, image := range dockerfileImages {
+		if _, exists := seen[image]; !exists {
+			seen[image] = struct{}{} // Mark this image as seen
+			images = append(images, image)
+		}
+	}
 
 	logrus.Debugf("%s\n", cacheDir)
 	logrus.Debugf("%s\n", images)
@@ -148,6 +162,14 @@ func (w *Warmer) Warm(image string, opts *config.WarmerOptions) (v1.Hash, error)
 		return v1.Hash{}, errors.Wrapf(err, "Failed to verify image name: %s", image)
 	}
 
+	// load local cache
+	if !opts.Force {
+		_, err := LoadLocalCache(&opts.CacheOptions, image)
+		if err == nil || IsExpired(err) {
+			return v1.Hash{}, AlreadyCachedErr{}
+		}
+	}
+
 	img, err := w.Remote(image, opts.RegistryOptions, opts.CustomPlatform)
 	if err != nil || img == nil {
 		return v1.Hash{}, errors.Wrapf(err, "Failed to retrieve image: %s", image)
@@ -158,11 +180,10 @@ func (w *Warmer) Warm(image string, opts *config.WarmerOptions) (v1.Hash, error)
 		return v1.Hash{}, errors.Wrapf(err, "Failed to retrieve digest: %s", image)
 	}
 
-	if !opts.Force {
-		_, err := w.Local(&opts.CacheOptions, digest.String())
-		if err == nil || IsExpired(err) {
-			return v1.Hash{}, AlreadyCachedErr{}
-		}
+	// save encoded name with digest
+	err = SaveManifestCacheEntry(opts.CacheDir, image, digest.String())
+	if err != nil {
+		return v1.Hash{}, errors.Wrapf(err, "Failed to save manifest for %s", image)
 	}
 
 	err = tarball.Write(cacheRef, img, w.TarWriter)

@@ -107,12 +107,16 @@ func cachedImage(opts *config.KanikoOptions, image string) (v1.Image, error) {
 	if d, ok := ref.(name.Digest); ok {
 		cacheKey = d.DigestStr()
 	} else {
-		image, err := remote.RetrieveRemoteImage(image, opts.RegistryOptions, opts.CustomPlatform)
+		var img v1.Image
+		img, err = cache.LoadLocalCache(&opts.CacheOptions, image)
 		if err != nil {
-			return nil, err
+			img, err = remote.RetrieveRemoteImage(image, opts.RegistryOptions, opts.CustomPlatform)
+			if err != nil {
+				return nil, err
+			}
 		}
 
-		d, err := image.Digest()
+		d, err := img.Digest()
 		if err != nil {
 			return nil, err
 		}

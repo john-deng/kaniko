@@ -17,6 +17,7 @@ limitations under the License.
 package cache
 
 import (
+	"encoding/base64"
 	"fmt"
 	"os"
 	"path"
@@ -167,6 +168,74 @@ func Destination(opts *config.KanikoOptions, cacheKey string) (string, error) {
 		return fmt.Sprintf("%s/cache:%s", destRef.Context(), cacheKey), nil
 	}
 	return fmt.Sprintf("%s:%s", cache, cacheKey), nil
+}
+
+func getManifestCacheDir(cacheDir string) string {
+	return filepath.Join(cacheDir, "manifests")
+}
+
+// SaveManifestCacheEntry writes out a digest under manifestCacheDir named
+// "$BASE64"
+func SaveManifestCacheEntry(cacheDir, image, digest string) (err error) {
+	var manifestCacheDir = getManifestCacheDir(cacheDir)
+	if err = os.MkdirAll(manifestCacheDir, 0o755); err != nil {
+		logrus.Warnf("Could not create manifest cache dir %q: %v", manifestCacheDir, err)
+		return
+	}
+
+	err = saveManifestToFile(manifestCacheDir, image, digest)
+	if err != nil {
+		logrus.Warnf("Could not save manifest to file %q: %v", manifestCacheDir, err)
+	}
+	baseName := filepath.Base(image)
+	if image != baseName {
+		err = saveManifestToFile(manifestCacheDir, baseName, digest)
+		if err != nil {
+			logrus.Warnf("Could not save manifest to file %q: %v", manifestCacheDir, err)
+		}
+	}
+	return
+}
+
+func saveManifestToFile(manifestCacheDir string, image string, digest string) (err error) {
+	file := filepath.Join(manifestCacheDir, encodeImageName(image))
+
+	// Write the digest to the file using os.WriteFile
+	err = os.WriteFile(file, []byte(digest), 0o644)
+	if err != nil {
+		logrus.Errorf("Failed to write digest for image %q: %v", image, err)
+		return
+	}
+	logrus.Infof("Successfully saved digest for image %q at %q", image, file)
+	return
+}
+
+// LoadLocalCache loads the cache for the given image from local file system
+func LoadLocalCache(opts *config.CacheOptions, image string) (v1.Image, error) {
+	var manifestCacheDir = getManifestCacheDir(opts.CacheDir)
+	// Construct the file path based on the image name
+	file := filepath.Join(manifestCacheDir, encodeImageName(image))
+
+	// Read the contents of the file
+	data, err := os.ReadFile(file)
+	if err != nil {
+		// Return an error if the file could not be read
+		return nil, fmt.Errorf("failed to load digest for image %q: %v", image, err)
+	}
+	// Return the digest as a string
+	logrus.Infof("Found the cache of image %v", image)
+	digest := string(data)
+
+	img, err := LocalSource(opts, digest)
+	if err != nil {
+		return nil, err
+	}
+	return img, nil
+}
+
+func encodeImageName(image string) string {
+	// URL-safe, no padding
+	return strings.TrimRight(base64.URLEncoding.EncodeToString([]byte(image)), "=")
 }
 
 // LocalSource retrieves a source image from a local cache given cacheKey

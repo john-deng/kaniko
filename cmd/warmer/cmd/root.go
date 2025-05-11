@@ -151,8 +151,10 @@ func validateDockerfilePath() error {
 		opts.DockerfilePath = abs
 		return nil
 	}
-
-	return errors.New("please provide a valid path to a Dockerfile within the build context with --dockerfile")
+	if len(opts.Images) == 0 {
+		return errors.New("please provide a valid path to a Dockerfile within the build context with --dockerfile")
+	}
+	return nil
 }
 
 func isURL(path string) bool {
