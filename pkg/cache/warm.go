@@ -175,7 +175,10 @@ func (w *Warmer) Warm(image string, opts *config.WarmerOptions) (v1.Hash, error)
 	}
 
 	// save encoded name with digest
-	SaveManifestCacheEntry(opts.CacheDir, image, digest.String())
+	err = SaveManifestCacheEntry(opts.CacheDir, image, digest.String())
+	if err != nil {
+		return v1.Hash{}, errors.Wrapf(err, "Failed to save manifest for %s", image)
+	}
 
 	err = tarball.Write(cacheRef, img, w.TarWriter)
 	if err != nil {

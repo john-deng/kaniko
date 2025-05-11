@@ -176,22 +176,38 @@ func getManifestCacheDir(cacheDir string) string {
 
 // SaveManifestCacheEntry writes out a digest under manifestCacheDir named
 // "$BASE64"
-func SaveManifestCacheEntry(cacheDir, image, digest string) {
+func SaveManifestCacheEntry(cacheDir, image, digest string) (err error) {
 	var manifestCacheDir = getManifestCacheDir(cacheDir)
-	if err := os.MkdirAll(manifestCacheDir, 0o755); err != nil {
+	if err = os.MkdirAll(manifestCacheDir, 0o755); err != nil {
 		logrus.Warnf("Could not create manifest cache dir %q: %v", manifestCacheDir, err)
 		return
 	}
+
+	err = saveManifestToFile(manifestCacheDir, image, digest)
+	if err != nil {
+		logrus.Warnf("Could not save manifest to file %q: %v", manifestCacheDir, err)
+	}
+	baseName := filepath.Base(image)
+	if image != baseName {
+		err = saveManifestToFile(manifestCacheDir, baseName, digest)
+		if err != nil {
+			logrus.Warnf("Could not save manifest to file %q: %v", manifestCacheDir, err)
+		}
+	}
+	return
+}
+
+func saveManifestToFile(manifestCacheDir string, image string, digest string) (err error) {
 	file := filepath.Join(manifestCacheDir, encodeImageName(image))
 
 	// Write the digest to the file using os.WriteFile
-	err := os.WriteFile(file, []byte(digest), 0o644)
+	err = os.WriteFile(file, []byte(digest), 0o644)
 	if err != nil {
-		logrus.Warnf("Failed to write digest for image %q: %v", image, err)
+		logrus.Errorf("Failed to write digest for image %q: %v", image, err)
 		return
 	}
-
 	logrus.Infof("Successfully saved digest for image %q at %q", image, file)
+	return
 }
 
 // LoadLocalCache loads the cache for the given image from local file system
