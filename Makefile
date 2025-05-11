@@ -93,13 +93,13 @@ integration-test-misc:
 
 .PHONY: k8s-executor-build-push
 k8s-executor-build-push:
-	DOCKER_BUILDKIT=1 docker build ${BUILD_ARG} --build-arg=GOARCH=$(GOARCH) --build-arg=TARGETOS=linux -t $(REGISTRY)/executor:$(VERSION) -f deploy/Dockerfile --target kaniko-executor .
-	docker push $(REGISTRY)/executor:$(VERSION)
+	DOCKER_BUILDKIT=1 docker build ${BUILD_ARG} --build-arg=GOARCH=$(GOARCH) --build-arg=TARGETOS=linux -t $(REGISTRY)/executor:$(VERSION)-$(GOARCH) -f deploy/Dockerfile --target kaniko-executor .
+	docker push $(REGISTRY)/executor:$(VERSION)-$(GOARCH)
 
 .PHONY: k8s-warmer-build-push
 k8s-warmer-build-push:
-	DOCKER_BUILDKIT=1 docker build ${BUILD_ARG} --build-arg=GOARCH=$(GOARCH) --build-arg=TARGETOS=linux -t $(REGISTRY)/warmer:$(VERSION) -f deploy/Dockerfile --target kaniko-warmer .
-	docker push $(REGISTRY)/warmer:$(VERSION)
+	DOCKER_BUILDKIT=1 docker build ${BUILD_ARG} --build-arg=GOARCH=$(GOARCH) --build-arg=TARGETOS=linux -t $(REGISTRY)/warmer:$(VERSION)-$(GOARCH) -f deploy/Dockerfile --target kaniko-warmer .
+	docker push $(REGISTRY)/warmer:$(VERSION)-$(GOARCH)
 
 .PHONY: k8s-executor-buildx-push
 k8s-executor-buildx-push:
